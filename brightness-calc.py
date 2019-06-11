@@ -8,6 +8,27 @@ import cv2
 import glob
 import numpy as np
 
+
+def crop_minAreaRect(img, rect):
+    # rotate img
+    angle = rect[2]
+    rows, cols = img.shape[0], img.shape[1]
+    M = cv2.getRotationMatrix2D((cols / 2, rows / 2), angle, 1)
+    img_rot = cv2.warpAffine(img, M, (cols, rows))
+
+    # rotate bounding box
+    rect0 = (rect[0], rect[1], 0.0)
+    box = cv2.boxPoints(rect0)
+    pts = np.int0(cv2.transform(np.array([box]), M))[0]
+    pts[pts < 0] = 0
+
+    # crop
+    img_crop = img_rot[pts[1][1]:pts[0][1],
+               pts[1][0]:pts[2][0]]
+
+    return img_crop
+
+
 # construct the argument parse and parse the arguments
 ap = argparse.ArgumentParser()
 ap.add_argument("-d", "--dir", required=True,
@@ -17,6 +38,9 @@ args = vars(ap.parse_args())
 # load the images
 print(args["dir"] + '/*png')
 images = [cv2.imread(file) for file in glob.glob(args["dir"] + '/*pgm')]
+
+# to store the means
+means = []
 
 # loop over the images
 for image in images:
@@ -57,13 +81,17 @@ for image in images:
     approx = cv2.approxPolyDP(rect, 0.04 * peri, True)
     compRect = cv2.minAreaRect(approx)
 
-    # draw original contour
-    cv2.drawContours(image, rect, -1, (0, 255, 0), 2)
-    # and rectangle contour
-    box = cv2.boxPoints(compRect)
-    box = np.int0(box)
-    cv2.drawContours(image, [box], 0, (0, 0, 255), 2)
+    # extract the cropped area
+    image = crop_minAreaRect(image, compRect)
+
+    # TODO register the output image in folder *dir*_cropped
 
     # show the output image
-    cv2.imshow("Image", image)
-    cv2.waitKey(0)
+    # cv2.imshow("Image", image)
+    # cv2.waitKey(0)
+
+    # get the mean value
+    mean, sd = cv2.meanStdDev(image)
+    means.append(float(mean[0]))
+
+print(np.mean(means))
