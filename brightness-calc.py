@@ -7,6 +7,7 @@ import imutils
 import cv2
 import glob
 import numpy as np
+import os
 
 
 def crop_minAreaRect(img, rect):
@@ -32,66 +33,96 @@ def crop_minAreaRect(img, rect):
 # construct the argument parse and parse the arguments
 ap = argparse.ArgumentParser()
 ap.add_argument("-d", "--dir", required=True,
-                help="path to the folder containing the images")
+                help="path to the folder containing the images (can use several, comma separated)")
+ap.add_argument('-v', action='store_true',
+                help="verbose mode, display the images one by one")
+ap.add_argument('-c', '--crop', default=0, type=float,
+                help="crop the image to reduce each dimension by the chosen value")
 args = vars(ap.parse_args())
 
-# load the images
-print(args["dir"] + '/*png')
-images = [cv2.imread(file) for file in glob.glob(args["dir"] + '/*pgm')]
+dirs = args["dir"].split(",")
 
-# to store the means
-means = []
+for dir in dirs:
+    # load the images
+    images = [(cv2.imread(file), os.path.split(os.path.splitext(file)[0])[1]) for file in glob.glob(dir + '/*pgm')]
 
-# loop over the images
-for image in images:
+    # to store the means
+    means = []
 
-    # resize it to a smaller factor so that
-    # the shapes can be approximated better
-    resized = imutils.resize(image, width=300)
-    ratio = image.shape[0] / float(resized.shape[0])
+    # register the output image in folder *dir*_cropped
+    path = dir + "_cropped"
 
-    # convert the resized image to grayscale, blur it slightly,
-    # and threshold it
-    gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    thresh = cv2.threshold(blurred, 40, 255, cv2.THRESH_BINARY)[1]
+    try:
+        os.mkdir(path)
+    except OSError:
+        print("Creation of the directory %s failed (maybe it already exists)" % path)
+    else:
+        print("Successfully created the directory %s " % path)
 
-    # find contours in the thresholded image
-    cnts = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL,
-                            cv2.CHAIN_APPROX_SIMPLE)
-    cnts = imutils.grab_contours(cnts)
+    # loop over the images
+    for image, name in images:
 
-    # loop over the contours and find the biggest one
-    maxArea = 0
-    for c in cnts:
-        # compute the size of the contour
-        size = cv2.contourArea(c)
+        # resize it to a smaller factor so that
+        # the shapes can be approximated better
+        # => removed
+        resized = image # imutils.resize(image, width=300)
+        ratio = image.shape[0] / float(resized.shape[0])
 
-        if size > maxArea:
-            maxArea = size
-            rect = c
+        # convert the resized image to grayscale, blur it slightly,
+        # and threshold it
+        gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        thresh = cv2.threshold(blurred, 45, 255, cv2.THRESH_BINARY)[1]
 
-    # multiply the contour (x, y)-coordinates by the resize ratio
-    rect = rect.astype("float")
-    rect *= ratio
-    rect = rect.astype("int")
+        # find contours in the thresholded image
+        cnts = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL,
+                                cv2.CHAIN_APPROX_SIMPLE)
+        cnts = imutils.grab_contours(cnts)
 
-    # then compute the bounding box
-    peri = cv2.arcLength(rect, True)
-    approx = cv2.approxPolyDP(rect, 0.04 * peri, True)
-    compRect = cv2.minAreaRect(approx)
+        # loop over the contours and find the biggest one
+        maxArea = 0
+        for c in cnts:
+            # compute the size of the contour
+            size = cv2.contourArea(c)
 
-    # extract the cropped area
-    image = crop_minAreaRect(image, compRect)
+            if size > maxArea:
+                maxArea = size
+                rect = c
 
-    # TODO register the output image in folder *dir*_cropped
+        # multiply the contour (x, y)-coordinates by the resize ratio
+        rect = rect.astype("float")
+        rect *= ratio
+        rect = rect.astype("int")
 
-    # show the output image
-    # cv2.imshow("Image", image)
-    # cv2.waitKey(0)
+        # then compute the bounding box
+        peri = cv2.arcLength(rect, True)
+        approx = cv2.approxPolyDP(rect, 0.04 * peri, True)
+        compRect = cv2.minAreaRect(approx)
 
-    # get the mean value
-    mean, sd = cv2.meanStdDev(image)
-    means.append(float(mean[0]))
+        # if required, crop the image more
+        if args["crop"] > 1:
+            (x, y), (width, height), angle = compRect
+            compRect = ((x, y), (width/args["crop"], height/args["crop"]), angle)
 
-print(np.mean(means))
+        # extract the cropped area
+        cropIm = crop_minAreaRect(image, compRect)
+
+        # get the mean value
+        mean, sd = cv2.meanStdDev(cropIm)
+        means.append(float(mean[0]))
+
+        # save the image
+        new_extension = '.png'
+        completePath = path+"\\"+name+new_extension
+        cv2.imwrite(completePath, cropIm)
+
+        # show the output image
+        if args["v"]:
+            cv2.drawContours(image, rect, -1, (0, 255, 0), 2)
+            box = cv2.boxPoints(compRect)
+            box = np.int0(box)
+            cv2.drawContours(image, [box], 0, (0, 0, 255), 2)
+            cv2.imshow("Image", image)
+            cv2.waitKey(0)
+
+    print(np.mean(means))
